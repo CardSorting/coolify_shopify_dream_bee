@@ -1,0 +1,2 @@
+{"timestamp": "2024-09-18 02:20:25,165", "name": "DiscordShopifyBot", "level": "INFO", "message": "Synced commands globally.", "pathname": "/home/runner/LotsOfBees/src/main.py", "lineno": 57, "funcName": "sync_commands", "process": 1192, "thread": 140582288682560}
+{"timestamp": "2024-09-18 02:20:27,530", "name": "DiscordShopifyBot", "level": "INFO", "message": "Bot connected as LotsOfBees#3580 and commands are synced globally.", "pathname": "/home/runner/LotsOfBees/src/main.py", "lineno": 62, "funcName": "on_ready", "process": 1192, "thread": 140582288682560}

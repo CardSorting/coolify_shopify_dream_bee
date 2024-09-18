@@ -1,0 +1,45 @@
+[tool.poetry]
+name = "discord-shopify-bot"
+version = "0.1.0"
+description = "A Discord bot that generates images using the FLUX.1 API, uploads them to Backblaze, and manages them on Shopify."
+authors = ["Your Name <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.10.0,<3.12"
+
+# Discord dependencies
+discord-py = "^2.3.1"
+
+# HTTP requests handling
+requests = "^2.31.0"
+aiohttp = "^3.8.5"
+
+# Environment variable management
+python-dotenv = "^1.0.0"
+
+# Asyncio support
+asyncio = "^3.4.3"
+
+# Shopify integration
+shopifyapi = "^12.0.0"
+
+# Backblaze B2 client
+b2sdk = "^1.14.0"
+
+# Development and linting tools
+pyright = "^1.1.310"
+ruff = "^0.0.283"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pyright]
+# Pyright type checker configuration
+useLibraryCodeForTypes = true
+exclude = [".cache"]
+
+[tool.ruff]
+# Ruff linter configuration
+select = ['E', 'W', 'F', 'I', 'B', 'C4', 'ARG', 'SIM']
+ignore = ['W291', 'W292', 'W293']
