@@ -1,3 +1,4 @@
+# cogs/image_product_command.py
 import asyncio
 import uuid
 from typing import Dict, Any, Optional
@@ -5,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import discord
-from discord import app_commands, Interaction, InteractionType
+from discord import app_commands, Interaction
 from discord.ext import commands, tasks
 
 from handlers.flux_image_handler import FluxImageHandler
@@ -15,18 +16,15 @@ from utils.embed_creator import EmbedCreator
 from utils.logger import Logger
 from utils.in_memory_queue import InMemoryQueue, QueueFullError, QueueEmptyError
 
-
 @dataclass
 class CachedInteraction:
     interaction: Interaction
     channel_id: int
     user_id: int
-    message_id: Optional[int] = None
     guild_id: Optional[int] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
     acknowledged: bool = False
     prompt: Optional[str] = None  # Added prompt field
-
 
 class ImageProductCommand(commands.Cog):
     """A Discord Cog for handling image generation and product creation."""
@@ -56,9 +54,6 @@ class ImageProductCommand(commands.Cog):
         self.product_creation_queue = InMemoryQueue[Dict[str, Any]](
             max_size=100, name="product_creation_queue"
         )
-
-        # In-memory cache for image URLs
-        self.image_url_cache: Dict[str, str] = {}
 
         # Interaction cache to store CachedInteraction objects for follow-up
         self.interaction_cache: Dict[int, CachedInteraction] = {}
@@ -101,6 +96,33 @@ class ImageProductCommand(commands.Cog):
     async def generate_product(self, interaction: discord.Interaction, prompt: str):
         """Command to generate a product image using AI."""
         await interaction.response.defer(ephemeral=True)
+        user_id = interaction.user.id
+
+        # Check if the user has at least 1 credit
+        credits = await self.bot.credit_system.get_credits(user_id)
+        if credits < 1:
+            await interaction.followup.send(
+                "You do not have enough credits to generate an image. Please claim your daily credits using `!claim`.",
+                ephemeral=True
+            )
+            return
+
+        # Deduct 1 credit
+        success = await self.bot.credit_system.deduct_credit(user_id, 1)
+        if not success:
+            await interaction.followup.send(
+                "Failed to deduct credit. Please try again.",
+                ephemeral=True
+            )
+            return
+
+        # Inform the user about remaining credits
+        remaining_credits = await self.bot.credit_system.get_credits(user_id)
+        await interaction.followup.send(
+            f"1 credit has been deducted for generating your image. You have **{remaining_credits}** credits remaining.",
+            ephemeral=True
+        )
+
         try:
             # Cache the interaction along with channel_id, user_id, and prompt for future follow-ups
             cached_interaction = CachedInteraction(
@@ -165,9 +187,27 @@ class ImageProductCommand(commands.Cog):
                 )
                 return
 
+            # Create an embed with the image and prompt
             embed = self.embed_creator.create_image_embed(image_url, prompt)
-            view = await self._create_product_options_view(image_url, interaction_id)
-            await self._send_followup(interaction_id, embed=embed, view=view)
+            await self._send_followup(interaction_id, embed=embed)
+
+            # Enqueue product creation automatically
+            async with self.interaction_cache_lock:
+                cached_interaction = self.interaction_cache.get(interaction_id)
+                if not cached_interaction:
+                    self.logger.error(f"No cached interaction found for ID {interaction_id}")
+                    return
+
+                await self.product_creation_queue.enqueue({
+                    'interaction_id': interaction_id,
+                    'image_url': image_url,
+                    'user_id': cached_interaction.user_id,
+                    'username': cached_interaction.interaction.user.name,
+                    'prompt': prompt
+                })
+
+            self.logger.info(f"Image generated and product creation enqueued for interaction {interaction_id}.")
+
         except Exception as e:
             self.logger.error(f"Error in _process_image_generation: {e}", exc_info=True)
             await self._send_followup(
@@ -192,98 +232,12 @@ class ImageProductCommand(commands.Cog):
             backblaze_url = await self.backblaze_handler.upload_image(file_name, image_content)
             if not backblaze_url:
                 self.logger.warning("Image upload failed: No URL returned from Backblaze.")
+            else:
+                self.logger.info(f"Image '{file_name}' uploaded successfully to Backblaze. URL: {backblaze_url}")
             return backblaze_url
         except Exception as e:
             self.logger.error(f"Error in _generate_and_upload_image: {e}", exc_info=True)
             return None
-
-    async def _create_product_options_view(
-            self, image_url: str, interaction_id: int) -> discord.ui.View:
-        """Create a view with a button to add the product to Shopify."""
-        view = discord.ui.View(timeout=None)
-        short_id = str(uuid.uuid4())[:8]
-        self.image_url_cache[short_id] = image_url
-        button = discord.ui.Button(
-            label="Add to Shop",
-            style=discord.ButtonStyle.green,
-            custom_id=f"add_to_shopify|{short_id}|{interaction_id}"
-        )
-        view.add_item(button)
-        return view
-
-    async def handle_add_to_shopify(self, interaction: Interaction):
-        """Handle the 'Add to Shopify' button click."""
-        if interaction.type != InteractionType.component:
-            await interaction.response.send_message(
-                "Invalid interaction type.", ephemeral=True)
-            return
-
-        if not isinstance(interaction.data, dict):
-            await interaction.response.send_message(
-                "Invalid interaction data.", ephemeral=True)
-            return
-
-        custom_id = interaction.data.get('custom_id')
-        if not custom_id:
-            await interaction.response.send_message(
-                "Invalid interaction data.", ephemeral=True)
-            return
-
-        custom_id_parts = custom_id.split('|')
-        if len(custom_id_parts) != 3:
-            await interaction.response.send_message(
-                "Invalid product data. Please try again.", ephemeral=True)
-            return
-
-        short_id, original_interaction_id = custom_id_parts[1], int(custom_id_parts[2])
-        image_url = self.image_url_cache.get(short_id)
-
-        # Retrieve the prompt from the cached interaction
-        prompt = None
-        async with self.interaction_cache_lock:
-            cached_interaction = self.interaction_cache.get(original_interaction_id)
-            if cached_interaction:
-                prompt = cached_interaction.prompt
-
-        if not image_url or not prompt:
-            await interaction.response.send_message(
-                "Product data or prompt not found. Please try generating the image again.",
-                ephemeral=True)
-            return
-
-        try:
-            # Defer the interaction to acknowledge it and defer the response
-            await interaction.response.defer(ephemeral=True)
-
-            await self.product_creation_queue.enqueue({
-                'interaction_id': interaction.id,
-                'original_interaction_id': original_interaction_id,
-                'image_url': image_url,
-                'user_id': interaction.user.id,
-                'username': interaction.user.name,  # Corrected to use 'name' attribute
-                'prompt': prompt  # Pass the prompt to the queue
-            })
-            await interaction.followup.send(
-                "Your product creation request has been queued. We'll notify you once it's processed.",
-                ephemeral=True
-            )
-        except QueueFullError:
-            await interaction.followup.send(
-                "We're currently processing too many requests. Please try again later.",
-                ephemeral=True
-            )
-        except discord.Forbidden:
-            self.logger.error("Failed to send follow-up message due to lack of permissions.")
-            await interaction.followup.send(
-                "I don't have permission to send messages in this channel. Please check my permissions.",
-                ephemeral=True
-            )
-        except Exception as e:
-            self.logger.error(f"Error in handle_add_to_shopify: {e}", exc_info=True)
-            await interaction.followup.send(
-                "An unexpected error occurred. Please try again or contact support if the problem persists.",
-                ephemeral=True
-            )
 
     @tasks.loop(seconds=1.0)
     async def process_product_creation_queue(self):
@@ -300,7 +254,6 @@ class ImageProductCommand(commands.Cog):
     async def _process_product_creation(self, item: Dict[str, Any]):
         """Process a single product creation request."""
         interaction_id = item['interaction_id']
-        original_interaction_id = item['original_interaction_id']
         image_url = item['image_url']
         user_id = item['user_id']
         username = item['username']
@@ -310,22 +263,27 @@ class ImageProductCommand(commands.Cog):
             product_data = self._create_product_data(username, image_url, prompt)
             response = await self.product_handler.add_product_to_shopify(product_data)
 
+            self.logger.debug(f"Product creation response: {response}")
+
+            # Adjust the condition based on actual response structure
             if response and 'product_url' in response:
-                embed = self._create_product_confirmation_embed(
-                    product_data, response['product_url']
+                # Successfully added to Shopify
+                self.logger.info(
+                    f"Product '{product_data['title']}' created successfully for interaction {interaction_id}."
                 )
-                await self._send_followup(original_interaction_id, embed=embed)
             else:
-                await self._send_followup(
-                    original_interaction_id,
-                    "Failed to add product to Shopify. Please try again."
+                # Failed to add to Shopify
+                self.logger.error(
+                    f"Failed to add product '{product_data['title']}' to Shopify for interaction {interaction_id}."
                 )
         except Exception as e:
             self.logger.error(f"Error in _process_product_creation: {e}", exc_info=True)
-            await self._send_followup(
-                original_interaction_id,
-                "An unexpected error occurred while creating the product. Please try again later."
-            )
+        finally:
+            # Remove interaction from cache to prevent memory leaks
+            async with self.interaction_cache_lock:
+                if interaction_id in self.interaction_cache:
+                    del self.interaction_cache[interaction_id]
+                    self.logger.debug(f"Removed interaction {interaction_id} from cache after processing.")
 
     def _create_product_data(self, username: str, image_url: str, prompt: str) -> Dict[str, Any]:
         """Create product data for Shopify with a unique, human-readable title.
@@ -338,17 +296,15 @@ class ImageProductCommand(commands.Cog):
         Returns:
             Dict[str, Any]: A dictionary containing product data for Shopify.
         """
-        # Extract the first two words from the prompt
+        # Extract the first four words from the prompt
         prompt_words = prompt.strip().split()
-        if len(prompt_words) >= 2:
-            first_two_words = ' '.join(prompt_words[:2]).title()
-        elif len(prompt_words) == 1:
-            first_two_words = prompt_words[0].title()
+        if len(prompt_words) >= 4:
+            first_four_words = ' '.join(prompt_words[:4]).title()  # Get the first four words and title case them
         else:
-            first_two_words = "Unique"
+            first_four_words = ' '.join(prompt_words).title()  # Title case the entire prompt if fewer than 4 words
 
         # Construct the title
-        title = f"{first_two_words} Artist Trading Card (ATC) by {username}"
+        title = f"{first_four_words} Artist Trading Card (ATC) by {username}"
 
         return {
             "title": title,
@@ -357,18 +313,6 @@ class ImageProductCommand(commands.Cog):
             "vendor": username,  # Use username for vendor
             "price": 6.99
         }
-
-    def _create_product_confirmation_embed(
-            self, product_data: Dict[str, Any], product_url: str) -> discord.Embed:
-        """Create an embed for product confirmation."""
-        return self.embed_creator.create_confirmation_embed(
-            title="Product Added Successfully",
-            description=(
-                f"Product '{product_data['title']}' has been added to Shopify "
-                f"with a price of ${product_data['price']:.2f}.\n\n"
-                f"View product: {product_url}"
-            )
-        )
 
     async def _send_followup(
             self,
@@ -391,7 +335,10 @@ class ImageProductCommand(commands.Cog):
             if cached_interaction:
                 # Step 1: Attempt to send follow-up using the original interaction
                 try:
-                    await cached_interaction.interaction.followup.send(content, **kwargs)
+                    if 'embed' in kwargs:
+                        await cached_interaction.interaction.followup.send(embed=kwargs['embed'], **{k: v for k, v in kwargs.items() if k != 'embed'})
+                    else:
+                        await cached_interaction.interaction.followup.send(content, **kwargs)
                     self.logger.info(f"Follow-up sent via original interaction {interaction_id}.")
                     return
                 except discord.DiscordException as e:
@@ -515,18 +462,6 @@ class ImageProductCommand(commands.Cog):
             f"- Total enqueued: {product_stats['total_enqueued']}\n"
             f"- Total dequeued: {product_stats['total_dequeued']}"
         )
-
-    @commands.Cog.listener()
-    async def on_interaction(self, interaction: Interaction):
-        """
-        Listen for interactions to handle component interactions like buttons.
-
-        This is necessary to route button clicks to their respective handlers.
-        """
-        if interaction.type == InteractionType.component:
-            custom_id = interaction.data.get('custom_id', '')
-            if custom_id.startswith('add_to_shopify'):
-                await self.handle_add_to_shopify(interaction)
 
 
 async def setup(bot: commands.Bot):

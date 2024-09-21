@@ -12,12 +12,12 @@ class FluxImageHandler:
         self.logger = Logger.get_instance("FluxImageHandler")
         # Initialize the fal_client here if needed
 
-    async def generate_image(self, prompt: str, image_size: str = "landscape_4_3", num_inference_steps: int = 28, 
+    async def generate_image(self, prompt: str, image_size: str = "portrait_16_9", num_inference_steps: int = 28, 
                              guidance_scale: float = 3.5, num_images: int = 1, enable_safety_checker: bool = True) -> Optional[str]:
         try:
             # Call fal_client.submit without await if it returns a SyncRequestHandle
             handler = fal_client.submit(
-                "fal-ai/fast-sdxl",
+                "fal-ai/flux-pro",
                 arguments={
                     "prompt": prompt,
                     "image_size": image_size,
@@ -38,16 +38,15 @@ class FluxImageHandler:
             return None
 
     async def download_image(self, image_url: str) -> Optional[bytes]:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(image_url) as response:
-                    if response.status == 200:
-                        return await response.read()
-                    self.logger.error(f"Failed to download image. Status: {response.status}")
+                try:
+                    async with aiohttp.ClientSession() as session, session.get(image_url) as response:
+                        if response.status == 200:
+                            return await response.read()
+                        self.logger.error(f"Failed to download image. Status: {response.status}")
+                        return None
+                except Exception as e:
+                    self.logger.error(f"Error downloading image: {str(e)}")
                     return None
-        except Exception as e:
-            self.logger.error(f"Error downloading image: {str(e)}")
-            return None
 
     async def get_request_status(self, request_id: str) -> Optional[Dict[str, Any]]:
         try:
