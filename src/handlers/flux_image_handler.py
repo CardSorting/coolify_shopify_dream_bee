@@ -12,7 +12,7 @@ class FluxImageHandler:
         self.logger = Logger.get_instance("FluxImageHandler")
         # Initialize the fal_client here if needed
 
-    async def generate_image(self, prompt: str, image_size: str = "portrait_16_9", num_inference_steps: int = 28, 
+    async def generate_image(self, prompt: str, image_size: str = "landscape_16_9", num_inference_steps: int = 28, 
                              guidance_scale: float = 3.5, num_images: int = 1, enable_safety_checker: bool = True) -> Optional[str]:
         try:
             # Call fal_client.submit without await if it returns a SyncRequestHandle
