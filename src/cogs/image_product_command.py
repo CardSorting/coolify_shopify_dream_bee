@@ -106,12 +106,12 @@ class ImageProductCommand(commands.Cog):
             self.logger.error(f"Error in _cleanup_interaction_cache: {e}", exc_info=True)
 
     @app_commands.command(
-        name='generate',
-        description="Generate a product image using AI"
+        name='dream',
+        description="Dream a beautiful dream with the help of DreamBee"
     )
-    @app_commands.describe(prompt="The prompt to generate the image with")
+    @app_commands.describe(prompt="Dream a beautiful dream with the help of DreamBee")
     async def generate_product(self, interaction: Interaction, prompt: str):
-        """Command to generate a product image using AI."""
+        """Dream a beautiful dream with the help of DreamBee"""
         await interaction.response.defer(ephemeral=True)
         user_id = interaction.user.id
 
@@ -214,6 +214,7 @@ class ImageProductCommand(commands.Cog):
         prompt = item['prompt']
 
         try:
+            # Generate and upload the image
             image_url = await self._generate_and_upload_image(prompt)
             if not image_url:
                 await self._send_followup(
@@ -320,7 +321,13 @@ class ImageProductCommand(commands.Cog):
     async def _generate_and_upload_image(self, prompt: str) -> Optional[str]:
         """Generate an image and upload it to Backblaze."""
         try:
-            image_url = await self.flux_handler.generate_image(prompt)
+            # Removed 'sync_mode' parameter as it's no longer needed
+            result = await self.flux_handler.generate_image(prompt)
+            if not result or 'images' not in result or not result['images']:
+                self.logger.warning("Image generation failed: No images returned.")
+                return None
+
+            image_url = result['images'][0]['url']
             if not image_url:
                 self.logger.warning("Image generation failed: No URL returned.")
                 return None

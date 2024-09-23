@@ -1,11 +1,10 @@
-# main.py
+# src/main.py
 
 import asyncio
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 import aiohttp
-import discord
 from discord.ext import commands
 from discord import Intents
 
@@ -31,12 +30,13 @@ REDIS_DB = int(os.getenv('REDIS_DB', 0))
 REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
 ADMIN_USER_ID = os.getenv('ADMIN_USER_ID')
 APPLICATION_ID = int(os.getenv('APPLICATION_ID'))
+FAL_KEY = os.getenv('FAL_KEY')  # Ensure FAL_KEY is loaded
 
 # Validate environment variables
 required_env_vars = [
     'DISCORD_TOKEN', 'SHOPIFY_ADMIN_API_TOKEN', 'SHOPIFY_SHOP_NAME',
     'BACKBLAZE_KEY_ID', 'BACKBLAZE_APPLICATION_KEY', 'BACKBLAZE_BUCKET_NAME',
-    'ADMIN_USER_ID', 'APPLICATION_ID'
+    'ADMIN_USER_ID', 'APPLICATION_ID', 'FAL_KEY'
 ]
 
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
