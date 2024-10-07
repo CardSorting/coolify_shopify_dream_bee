@@ -1,17 +1,23 @@
+# src/handlers/flux_image_handler.py
+
 import os
 import re
 import asyncio
 from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
-import fal_client  # Ensure this client library supports necessary operations
+import fal_client
 import aiohttp
-import difflib  # Import for fuzzy matching
+import difflib  # For fuzzy matching
+from dotenv import load_dotenv
 
 from utils.logger import Logger
 
+# Load environment variables
+load_dotenv()
+
 # Configuration Constants
 MAX_RETRIES = 3
-BACKOFF_FACTOR = 2  # Exponential backoff factor
+BACKOFF_FACTOR = 2
 THREAD_POOL_WORKERS = 5
 IMAGE_SIZE_DEFAULT = "landscape_16_9"
 SAFETY_TOLERANCE_DEFAULT = "5"
@@ -25,7 +31,6 @@ VALID_IMAGE_SIZES = {
 }
 VALID_SAFETY_TOLERANCES = {"1", "2", "3", "4", "5", "6"}
 VALID_OUTPUT_FORMATS = {"jpeg", "png"}
-
 
 class FluxImageHandler:
     """
@@ -52,7 +57,6 @@ class FluxImageHandler:
         Determine the image size based on keywords present in the prompt.
         Uses fuzzy matching to account for typos.
         """
-        # Expanded keyword lists with synonyms and related terms
         portrait_keywords = [
             "portrait", "person", "people", "face", "vertical", "standing", "tall",
             "headshot", "close-up", "full-body", "individual", "solo", "figure",
@@ -71,10 +75,8 @@ class FluxImageHandler:
             "plain", "plateau", "canyon", "cliff"
         ]
 
-        # Convert prompt to lowercase and split into words for fuzzy matching
         prompt_words = re.findall(r'\b\w+\b', prompt.lower())
 
-        # Function to count fuzzy matches
         def count_matches_fuzzy(words: List[str], keywords: List[str]) -> int:
             count = 0
             for word in words:
@@ -84,14 +86,11 @@ class FluxImageHandler:
                     count += 1
             return count
 
-        # Count matches for portrait and landscape
         portrait_score = count_matches_fuzzy(prompt_words, portrait_keywords)
         landscape_score = count_matches_fuzzy(prompt_words, landscape_keywords)
 
-        # Debug logs to trace scores
         self.logger.debug(f"Portrait score: {portrait_score}, Landscape score: {landscape_score}")
 
-        # Determine image size based on scores
         if portrait_score > landscape_score:
             self.logger.debug("Portrait orientation selected based on prompt keywords.")
             return "portrait_16_9"
@@ -116,22 +115,18 @@ class FluxImageHandler:
         """
         Generate an image based on the provided prompt.
         """
-        # Sanitize and validate the prompt
         sanitized_prompt = self._sanitize_prompt(prompt)
         if not sanitized_prompt:
             self.logger.warning("Invalid prompt provided for image generation.")
             return None
 
-        # Determine image size if not provided
         if not image_size:
             image_size = self.determine_image_size(sanitized_prompt)
 
-        # Validate image_size
         if image_size not in VALID_IMAGE_SIZES:
             self.logger.warning(f"Invalid image_size '{image_size}' provided. Defaulting to '{IMAGE_SIZE_DEFAULT}'.")
             image_size = IMAGE_SIZE_DEFAULT
 
-        # Prepare arguments
         arguments = {
             "prompt": sanitized_prompt,
             "image_size": image_size,
@@ -143,26 +138,23 @@ class FluxImageHandler:
             "enable_safety_checker": True
         }
 
-        # Include optional parameters if provided
         if seed is not None:
             arguments["seed"] = seed
 
         self.logger.debug(f"Arguments for image generation: {arguments}")
 
-        # Implement retry mechanism with exponential backoff
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 loop = asyncio.get_running_loop()
                 handler = await loop.run_in_executor(
                     self.executor,
-                    lambda: fal_client.submit("fal-ai/flux-pro", arguments)
+                    lambda: fal_client.submit("fal-ai/flux-pro/v1.1", arguments)
                 )
                 self.logger.debug(
                     f"Submitted image generation request with prompt: '{sanitized_prompt}' and size: '{image_size}'. "
                     f"Attempt {attempt}."
                 )
 
-                # Wait for the result synchronously
                 result = await loop.run_in_executor(
                     self.executor,
                     handler.get
@@ -193,8 +185,7 @@ class FluxImageHandler:
         """
         Sanitize the user prompt to prevent injection attacks and ensure validity.
         """
-        # Example: Remove unwanted characters, limit length
-        sanitized = re.sub(r'[<>]', '', prompt)  # Remove angle brackets
+        sanitized = re.sub(r'[<>]', '', prompt)
         sanitized = sanitized.strip()
         if 3 <= len(sanitized) <= 200:
             return sanitized

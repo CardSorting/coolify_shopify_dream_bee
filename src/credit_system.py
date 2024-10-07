@@ -1,15 +1,18 @@
+# src/credit_system.py
+
 import os
 from typing import Dict, List, Tuple, Union, Optional
 from dataclasses import dataclass
 import asyncio
-
 import redis.asyncio as redis
 from dotenv import load_dotenv
 
 from utils.logger import Logger
 
+# Load environment variables from a .env file
 load_dotenv()
 
+# Custom exceptions specific to the Credit System
 class CreditSystemError(Exception):
     pass
 
@@ -19,6 +22,7 @@ class RedisConnectionError(CreditSystemError):
 class InsufficientCreditsError(CreditSystemError):
     pass
 
+# Data class to hold Redis configuration
 @dataclass
 class RedisConfig:
     host: str
@@ -26,20 +30,24 @@ class RedisConfig:
     db: int
     password: Optional[str]
 
+# Main class to manage credit operations using Redis
 class CreditSystem:
-    def __init__(self, **kwargs):
+    def __init__(self):
+        # Initialize Redis configuration using environment variables
         self.config = RedisConfig(
-            host=kwargs.get('host', os.getenv('REDIS_HOST', 'localhost')),
-            port=int(kwargs.get('port', os.getenv('REDIS_PORT', 6379))),
-            db=int(kwargs.get('db', os.getenv('REDIS_DB', 0))),
-            password=kwargs.get('password', os.getenv('REDIS_PASSWORD'))
+            host=os.getenv('REDIS_HOST', 'localhost'),
+            port=int(os.getenv('REDIS_PORT', 6379)),
+            db=int(os.getenv('REDIS_DB', 0)),
+            password=os.getenv('REDIS_PASSWORD')
         )
+        # Redis client and logger instance initialization
         self.redis_client: Optional[redis.Redis] = None
         self.logger = Logger.get_instance("CreditSystem")
 
     async def initialize(self):
         """Initialize the Redis client."""
         try:
+            # Set up the Redis client with the configuration
             self.redis_client = redis.Redis(
                 host=self.config.host,
                 port=self.config.port,
@@ -49,9 +57,11 @@ class CreditSystem:
                 retry_on_timeout=True,
                 health_check_interval=30
             )
+            # Test the connection by pinging Redis
             await self.redis_client.ping()
             self.logger.info("Connected to Redis successfully.")
         except redis.RedisError as e:
+            # Log and raise a custom error if connection fails
             self.logger.error(f"Failed to connect to Redis: {e}")
             raise RedisConnectionError(f"Unable to connect to Redis: {e}") from e
 
@@ -66,7 +76,7 @@ class CreditSystem:
         """Construct a Redis key for a user and key type."""
         return f"user:{user_id}:{key_type}"
 
-    async def _execute_redis_operation(self, operation, *args):
+    async def _execute_redis_operation(self, operation, *args) -> Union[int, bool, None]:
         """Execute a Redis operation with retry logic."""
         max_retries, retry_delay = 3, 0.1
         for attempt in range(max_retries):

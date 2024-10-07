@@ -52,15 +52,15 @@ class CreditCommands(commands.Cog):
             self.bot.logger.error(f"Error deducting credits from user {member.id}: {e}", exc_info=True)
             await interaction.response.send_message("An error occurred while deducting credits. Please try again later.")
 
-    @app_commands.command(name="claim", description="Claim 5 daily credits.")
+    @app_commands.command(name="claim", description="Claim 25 daily credits.")
     async def claim(self, interaction: discord.Interaction):
         user_id = interaction.user.id
         try:
             can_claim, remaining = await self.bot.credit_system.can_claim(user_id)
             if can_claim:
-                await self.bot.credit_system.add_credit(user_id, 5)
+                await self.bot.credit_system.add_credit(user_id, 25)
                 await self.bot.credit_system.set_last_claim(user_id)
-                await interaction.response.send_message(f"{interaction.user.mention}, you've successfully claimed **5** credits! You can claim again in 24 hours.")
+                await interaction.response.send_message(f"{interaction.user.mention}, you've successfully claimed **25** credits! You can claim again in 24 hours.")
             else:
                 hours, remainder = divmod(remaining, 3600)
                 minutes, seconds = divmod(remainder, 60)

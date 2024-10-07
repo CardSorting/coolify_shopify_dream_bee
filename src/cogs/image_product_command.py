@@ -301,7 +301,7 @@ class ImageProductCommand(commands.Cog):
     def _create_product_title(self, prompt: str, username: str) -> str:
         """Create a unique, human-readable product title based on the prompt and username."""
         prompt_words = prompt.strip().split()
-        first_four_words = ' '.join(prompt_words[:4]).title() if len(prompt_words) >= 4 else ' '.join(prompt_words).title()
+        first_four_words = ' '.join(prompt_words[:8]).title() if len(prompt_words) >= 8 else ' '.join(prompt_words).title()
         title = f"{first_four_words} Artist Trading Card (ATC) by {username}"
         return title
 
